@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Whiskas Purr-O-Meter | Web App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;700;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #050505;
+            color: white;
+            overflow: hidden;
+            /* Changed to 100dvh for better mobile browser support */
+            height: 100dvh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            background-image: radial-gradient(circle at 50% 50%, #1a1a1a 0%, #000 80%);
+        }
+
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* SCAN LINE */
+        .scan-line {
+            width: 100%; height: 2px; background: #d64aff; position: absolute; top: 0; left: 0; opacity: 0.5;
+            animation: scan 3s linear infinite; box-shadow: 0 0 10px #d64aff; z-index: 5; pointer-events: none;
+        }
+        @keyframes scan { 0% { top: 0%; opacity: 0; } 100% { top: 100%; opacity: 0; } }
+
+        /* RESULT CARD */
+        .result-card {
+            background: rgba(20, 20, 20, 0.95); backdrop-filter: blur(20px);
+            border: 1px solid rgba(214, 74, 255, 0.4); box-shadow: 0 0 60px rgba(214, 74, 255, 0.15);
+            transform: translateY(110%); transition: transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+            max-width: 500px; width: 90%;
+            pointer-events: auto;
+        }
+        .result-card.active { transform: translateY(0); }
+
+        /* GLITCH */
+        .glitch-text { animation: glitch 3s infinite; }
+        @keyframes glitch {
+            0% { transform: translate(0); } 2% { transform: translate(-2px, 1px); }
+            4% { transform: translate(2px, -1px); } 6% { transform: translate(0); } 100% { transform: translate(0); }
+        }
+
+        /* RETICLE */
+        #reticle { transition: all 0.5s ease; }
+        .reticle-corner { width: 30px; height: 30px; position: absolute; border-color: #d64aff; border-style: solid; transition: all 0.3s ease; }
+        .tl { top: 0; left: 0; border-width: 2px 0 0 2px; } .tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
+        .bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; } .br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+        
+        .analyzing .reticle-corner { width: 50px; height: 50px; border-color: #fff; box-shadow: 0 0 20px #d64aff; }
+        .rejected .reticle-corner { border-color: #ef4444; box-shadow: 0 0 20px #ef4444; }
+
+    </style>
+</head>
+<body class="relative">
+
+    <!-- BACKGROUND -->
+    <div class="absolute inset-0 z-0 opacity-20 pointer-events-none" style="background-image: radial-gradient(#333 1px, transparent 1px); background-size: 40px 40px;"></div>
+    <div class="scan-line hidden" id="scan-line"></div>
+
+    <!-- HEADER -->
+    <div class="z-50 w-full p-6 md:p-10 flex justify-between items-start pointer-events-none">
+        <div class="pointer-events-auto">
+            <div class="flex items-center gap-3 mb-1">
+                <i class="fas fa-cat text-2xl md:text-3xl text-[#d64aff]"></i>
+                <span class="font-black tracking-tighter text-xl md:text-2xl">WHISKAS</span>
+            </div>
+            <div class="text-[10px] md:text-xs font-mono text-gray-500 tracking-widest">ACOUSTIC HEALTH CHECK</div>
+        </div>
+        <div class="text-[10px] md:text-xs font-mono text-[#d64aff] border border-[#d64aff] px-3 py-1 rounded bg-[#d64aff]/10 flex items-center gap-2 pointer-events-auto">
+            <i class="fas fa-circle text-[6px] animate-pulse"></i> BETA v2.0
+        </div>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="flex-1 flex flex-col items-center justify-center relative z-10 w-full">
+        
+        <!-- VISUALIZER -->
+        <div class="relative w-[300px] h-[300px] md:w-[500px] md:h-[500px] flex items-center justify-center" id="reticle">
+            <div class="reticle-corner tl"></div><div class="reticle-corner tr"></div>
+            <div class="reticle-corner bl"></div><div class="reticle-corner br"></div>
+            
+            <canvas id="visualizer" class="opacity-50 transition-opacity duration-500 w-full h-full"></canvas>
+            
+            <!-- Center Display -->
+            <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <div class="text-6xl md:text-8xl font-black font-mono tracking-tighter tabular-nums opacity-0 transition-opacity duration-300 drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]" id="progress-display">0%</div>
+                <div class="text-xs text-[#d64aff] font-mono tracking-widest mt-2 opacity-0" id="progress-label">ANALYZING</div>
+            </div>
+
+            <!-- Desktop Data -->
+            <div class="absolute -left-32 top-1/2 -translate-y-1/2 text-right hidden lg:block font-mono text-xs space-y-8 opacity-0 transition-opacity duration-500" id="desktop-data-left">
+                <div><div class="text-[#d64aff] mb-1">INPUT</div><div class="text-2xl font-bold" id="desk-input">MIC</div></div>
+                <div><div class="text-[#d64aff] mb-1">PITCH</div><div class="text-2xl font-bold" id="desk-freq">-- Hz</div></div>
+            </div>
+             <div class="absolute -right-32 top-1/2 -translate-y-1/2 text-left hidden lg:block font-mono text-xs space-y-8 opacity-0 transition-opacity duration-500" id="desktop-data-right">
+                <div><div class="text-[#d64aff] mb-1">TARGET</div><div class="text-2xl font-bold">FELINE</div></div>
+                <div><div class="text-[#d64aff] mb-1">MATCH</div><div class="text-2xl font-bold" id="desk-conf">0%</div></div>
+            </div>
+        </div>
+
+        <!-- Mobile Data -->
+        <div class="flex justify-between w-[300px] mt-8 font-mono text-[10px] text-gray-500 md:hidden hidden" id="mobile-data">
+            <div class="text-left"><div class="text-[#d64aff]">FREQ</div><div id="val-freq">--</div></div>
+            <div class="text-right"><div class="text-[#d64aff]">MATCH</div><div id="val-match">--</div></div>
+        </div>
+        
+        <div class="mt-8 md:mt-12 text-center h-4">
+            <p id="main-status" class="text-gray-400 text-xs md:text-sm tracking-[0.3em] font-mono">INITIALIZE SENSOR</p>
+        </div>
+    </div>
+
+    <!-- FOOTER CONTROLS -->
+    <!-- Increased z-index to 30 to ensure it sits above content -->
+    <div class="z-30 w-full p-6 md:p-10 pb-12 bg-gradient-to-t from-black via-black/90 to-transparent flex justify-center relative">
+        <button id="mic-btn" class="w-full max-w-md bg-white text-black font-bold py-4 md:py-5 rounded-lg shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:bg-[#d64aff] hover:text-white hover:shadow-[0_0_40px_rgba(214,74,255,0.6)] transition-all active:scale-95 flex items-center justify-center gap-3 font-mono tracking-wider text-sm md:text-base border border-white cursor-pointer relative z-50">
+            <i class="fas fa-microphone"></i> ACTIVATE SENSOR
+        </button>
+        
+        <!-- Hidden Demo Button for Video Purposes -->
+        <button id="demo-btn" class="absolute bottom-4 left-4 text-[9px] text-gray-700 hover:text-gray-500 font-mono cursor-pointer z-50">
+            [RUN DEMO]
+        </button>
+    </div>
+
+    <!-- RESULT OVERLAY -->
+    <!-- Added 'invisible' class to ensure it doesn't block clicks when hidden -->
+    <div id="result-overlay" class="absolute inset-0 z-40 flex items-end md:items-center justify-center pointer-events-none p-4 pb-8 md:pb-0 backdrop-blur-sm bg-black/40 opacity-0 invisible transition-all duration-300">
+        <div class="result-card rounded-2xl p-8 text-center relative overflow-hidden flex flex-col items-center">
+            <div class="absolute top-0 left-1/2 transform -translate-x-1/2 w-64 h-64 bg-[#d64aff] opacity-20 blur-3xl rounded-full"></div>
+            <div class="relative z-10 w-full">
+                <div class="inline-block px-4 py-1 border border-[#d64aff] rounded-full text-[#d64aff] text-[10px] font-mono mb-6 tracking-widest">ANALYSIS COMPLETE</div>
+                <h2 class="text-4xl md:text-5xl font-black italic uppercase leading-none mb-2 glitch-text">HIGH FIDELITY</h2>
+                <h3 class="text-sm md:text-base font-bold text-gray-400 tracking-[0.3em] uppercase mb-8">NUTRITION VERIFIED</h3>
+                <div class="grid grid-cols-3 gap-4 mb-8 w-full text-left">
+                    <div class="bg-white/5 p-4 rounded border border-white/10">
+                        <div class="text-[9px] text-gray-500 font-mono tracking-wider">VOLUME</div>
+                        <div class="text-2xl md:text-3xl font-bold text-white">96<span class="text-xs">dB</span></div>
+                    </div>
+                    <div class="bg-white/5 p-4 rounded border border-white/10">
+                        <div class="text-[9px] text-gray-500 font-mono tracking-wider">RHYTHM</div>
+                        <div class="text-sm md:text-base font-bold text-[#d64aff] mt-1">STEADY</div>
+                    </div>
+                    <div class="bg-white/5 p-4 rounded border border-white/10">
+                        <div class="text-[9px] text-gray-500 font-mono tracking-wider">HEALTH</div>
+                        <div class="text-sm md:text-base font-bold text-green-400 mt-1">OPTIMAL</div>
+                    </div>
+                </div>
+                <div class="flex gap-4 w-full">
+                    <button onclick="resetApp()" class="flex-1 py-4 bg-gray-800 rounded font-mono text-[10px] hover:bg-gray-700 tracking-widest text-gray-300 cursor-pointer">RESET</button>
+                    <button class="flex-[2] py-4 bg-[#d64aff] rounded font-bold font-mono text-[10px] text-white tracking-widest shadow-[0_0_15px_rgba(214,74,255,0.4)] hover:shadow-[0_0_25px_rgba(214,74,255,0.6)] transition-all cursor-pointer">SHARE PROOF</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const micBtn = document.getElementById('mic-btn');
+        const demoBtn = document.getElementById('demo-btn');
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+        const progressDisplay = document.getElementById('progress-display');
+        const progressLabel = document.getElementById('progress-label');
+        const mainStatus = document.getElementById('main-status');
+        const reticle = document.getElementById('reticle');
+        const resultOverlay = document.getElementById('result-overlay');
+        const resultCard = document.querySelector('.result-card');
+        
+        // Data Groups
+        const mobileData = document.getElementById('mobile-data');
+        const desktopDataLeft = document.getElementById('desktop-data-left');
+        const desktopDataRight = document.getElementById('desktop-data-right');
+        const scanLine = document.getElementById('scan-line');
+
+        // Dynamic Values
+        const valFreq = document.getElementById('val-freq');
+        const valMatch = document.getElementById('val-match');
+        const deskFreq = document.getElementById('desk-freq');
+        const deskConf = document.getElementById('desk-conf');
+
+        let isRunning = false;
+        let analysisProgress = 0;
+        let isCatDetected = false;
+        
+        function resizeCanvas() {
+            const rect = document.getElementById('reticle').getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        setTimeout(resizeCanvas, 100);
+
+        micBtn.addEventListener('click', startMic);
+        demoBtn.addEventListener('click', runSimulation);
+
+        async function startMic() {
+            if(isRunning) return;
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const source = audioCtx.createMediaStreamSource(stream);
+                const analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 256;
+                source.connect(analyser);
+                runAnalysis(analyser, false);
+            } catch(e) {
+                alert("Microphone denied. Running Simulation.");
+                runSimulation();
+            }
+        }
+
+        function runSimulation() {
+            if(isRunning) return;
+            // Fake analyser
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const analyser = audioCtx.createAnalyser();
+            // Connect oscillator for visual
+            const osc = audioCtx.createOscillator(); osc.frequency.value = 50; osc.connect(analyser); osc.start();
+            runAnalysis(analyser, true);
+        }
+
+        function runAnalysis(analyser, isSimulation) {
+            isRunning = true;
+            resizeCanvas();
+            micBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> LISTENING...';
+            micBtn.classList.add('opacity-75', 'cursor-not-allowed');
+            
+            mobileData.classList.remove('hidden');
+            desktopDataLeft.classList.remove('opacity-0');
+            desktopDataRight.classList.remove('opacity-0');
+            scanLine.classList.remove('hidden');
+            progressDisplay.classList.remove('opacity-0');
+            progressLabel.classList.remove('opacity-0');
+            canvas.classList.remove('opacity-50');
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            function loop() {
+                if(!isRunning) return;
+                requestAnimationFrame(loop);
+                
+                if(isSimulation) {
+                    // Fake Data for simulation
+                    for(let i=0; i<bufferLength; i++) dataArray[i] = Math.random() * 100 + (i<10 ? 100 : 0);
+                } else {
+                    analyser.getByteFrequencyData(dataArray);
+                }
+
+                // --- ALGORITHM: CAT FILTER ---
+                let bassEnergy = 0;
+                let trebleEnergy = 0;
+                
+                for(let i=0; i<10; i++) bassEnergy += dataArray[i]; // Low Freq
+                for(let i=20; i<100; i++) trebleEnergy += dataArray[i]; // High Freq
+                
+                bassEnergy = bassEnergy / 10;
+                trebleEnergy = trebleEnergy / 80;
+
+                let volume = bassEnergy; 
+                
+                if (volume > 20) { 
+                    if (bassEnergy > trebleEnergy * 1.5 || isSimulation) {
+                        isCatDetected = true;
+                        analysisProgress += 0.5; 
+                        mainStatus.innerText = "CAT FREQUENCY DETECTED";
+                        mainStatus.classList.add('text-[#d64aff]');
+                        mainStatus.classList.remove('text-red-500');
+                        reticle.classList.add('analyzing');
+                        reticle.classList.remove('rejected');
+                        reticle.style.borderColor = "#4ade80"; 
+                    } else {
+                        isCatDetected = false;
+                        mainStatus.innerText = "HUMAN VOICE DETECTED - IGNORED";
+                        mainStatus.classList.remove('text-[#d64aff]');
+                        mainStatus.classList.add('text-red-500');
+                        reticle.classList.remove('analyzing');
+                        reticle.classList.add('rejected');
+                        reticle.style.borderColor = "#ef4444"; 
+                    }
+                } else {
+                    mainStatus.innerText = "WAITING FOR SIGNAL...";
+                    mainStatus.classList.remove('text-[#d64aff]', 'text-red-500');
+                    reticle.classList.remove('analyzing', 'rejected');
+                    reticle.style.borderColor = "#d64aff";
+                }
+
+                if(analysisProgress > 100) analysisProgress = 100;
+                progressDisplay.innerText = Math.floor(analysisProgress) + "%";
+                
+                deskFreq.innerText = isCatDetected ? "< 100 Hz" : "> 300 Hz";
+                deskConf.innerText = Math.floor(analysisProgress) + "%";
+                valFreq.innerText = isCatDetected ? "LOW" : "HIGH";
+                valMatch.innerText = Math.floor(analysisProgress) + "%";
+
+                const width = canvas.width / (window.devicePixelRatio || 1);
+                const height = canvas.height / (window.devicePixelRatio || 1);
+                ctx.clearRect(0,0,width,height);
+                
+                const cx = width/2; const cy = height/2;
+                const radius = (width*0.25) + (volume * 0.5);
+                const color = isCatDetected ? '#4ade80' : (volume > 20 ? '#ef4444' : '#d64aff');
+
+                ctx.beginPath();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                for (let i = 0; i < 60; i++) {
+                    let angle = (i / 60) * Math.PI * 2;
+                    let r = radius + (dataArray[i % 20] * 0.2); 
+                    let x = cx + Math.cos(angle) * r;
+                    let y = cy + Math.sin(angle) * r;
+                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.closePath();
+                ctx.stroke();
+                
+                if (analysisProgress >= 100) {
+                    finishAnalysis();
+                }
+            }
+            loop();
+        }
+
+        function finishAnalysis() {
+            isRunning = false;
+            // Remove invisible to make it clickable
+            resultOverlay.classList.remove('opacity-0', 'invisible');
+            resultCard.classList.add('active');
+            mainStatus.innerText = "COMPLETE";
+            scanLine.classList.add('hidden');
+            reticle.classList.remove('analyzing');
+            canvas.classList.add('opacity-0');
+        }
+
+        window.resetApp = function() {
+            // Add invisible to prevent blocking
+            resultOverlay.classList.add('opacity-0', 'invisible');
+            resultCard.classList.remove('active');
+            micBtn.innerHTML = '<i class="fas fa-microphone"></i> ACTIVATE SENSOR';
+            micBtn.classList.remove('opacity-75', 'cursor-not-allowed');
+            mainStatus.innerText = "INITIALIZE SENSOR";
+            mainStatus.className = "text-gray-400 text-xs md:text-sm tracking-[0.3em] font-mono";
+            progressDisplay.innerText = "0%";
+            progressDisplay.classList.add('opacity-0');
+            progressLabel.classList.add('opacity-0');
+            analysisProgress = 0;
+            canvas.classList.remove('opacity-0');
+            canvas.classList.add('opacity-50');
+            reticle.style.borderColor = "#d64aff";
+            reticle.classList.remove('rejected');
+        }
+    </script>
+</body>
+</html>
